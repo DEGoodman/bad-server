@@ -30,22 +30,22 @@ func main() {
 
 	r.HandleFunc("/", rootHandler)
 
-	srv := &http.Server {
-		Handler:		r,
-		Addr:			":8080",
-		ReadTimeout:	10 * time.Second,
-		WriteTimeout:	10 * time.Second,
+	srv := &http.Server{
+		Handler:      r,
+		Addr:         ":8080",
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
 	}
 
 	// Configure Logging
-	LOG_FILE_LOCATION := os.Getenv("LOG_FILE_LOCATION")
-	if LOG_FILE_LOCATION != "" {
+	logFileLocation := os.Getenv("LOG_FILE_LOCATION")
+	if logFileLocation != "" {
 		log.SetOutput(&lumberjack.Logger{
-			Filename:	LOG_FILE_LOCATION,
-			MaxSize:	500,  //megabytes
-			MaxBackups:	3,
-			MaxAge:		28,   //days
-			Compress:	true, // disabled by defaulr
+			Filename:   logFileLocation,
+			MaxSize:    500, //megabytes
+			MaxBackups: 3,
+			MaxAge:     28,   //days
+			Compress:   true, // disabled by defaulr
 		})
 	}
 
