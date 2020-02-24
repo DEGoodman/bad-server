@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -14,14 +16,53 @@ import (
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
-func rootHandler(w http.ResponseWriter, r *http.Request) {
-	query := r.URL.Query()
-	name := query.Get("name")
-	if name == "" {
-		name = "Guest"
+type Users struct {
+	Users []User `json:"users"`
+}
+
+type User struct {
+	UUID     string `json:"guid"` // github.com/google/uuid is more than we need now
+	IsActive bool   `json:"isActive"`
+	Age      uint8  `json:"age"`
+	EyeColor string `json:"eyeColor"`
+	Name     Name   `json:"name"`
+	Company  string `json:"company"`
+	Email    string `json:"email"`
+	Phone    string `json:"phone"`
+	Address  string `json:"address"`
+	About    string `json:"about"`
+}
+
+type Name struct {
+	First string `json:"first"`
+	Last  string `json:"last"`
+}
+
+// returns a pointer to the struct of all users
+func loadUsers() *Users {
+	jsonFile, err := os.Open("users.json")
+	if err != nil {
+		log.Fatal(err)
 	}
-	log.Printf("Received request for %s\n", name)
-	w.Write([]byte(fmt.Sprintf("Hello, %s\n", name)))
+	defer jsonFile.Close()
+
+	byteValue, _ := ioutil.ReadAll(jsonFile)
+	var users Users
+	json.Unmarshal(byteValue, &users)
+
+	return &users
+
+}
+
+func rootHandler(w http.ResponseWriter, r *http.Request) {
+
+	userData := loadUsers()
+	fmt.Printf("%+v", userData)
+
+	query := r.URL.Query()
+	fmt.Printf("Query params: %s", query)
+
+	json.NewEncoder(w).Encode(userData)
 }
 
 func main() {
@@ -45,7 +86,7 @@ func main() {
 			MaxSize:    500, //megabytes
 			MaxBackups: 3,
 			MaxAge:     28,   //days
-			Compress:   true, // disabled by defaulr
+			Compress:   true, // disabled by default
 		})
 	}
 
