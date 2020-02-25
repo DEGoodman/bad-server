@@ -128,6 +128,7 @@ func main() {
 	r.HandleFunc("/auth", generateTokens)
 
 	// Set client key for /users
+	clientID = make(map[string]int)
 	clientID["users"] = rand.Int()
 
 	srv := &http.Server{
