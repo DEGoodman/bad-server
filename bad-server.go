@@ -88,9 +88,10 @@ func returnAllUsers(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("request validated")
 	userData := loadUsers()
 	userLen := len(userData.Users)
-	guids := make([]string, userLen) //here we can make slices of different length than users array
+	guids := make([]string, userLen+1) //here we can make slices of different length than users array, providing an extra line for the expected count
+	guids[0] = fmt.Sprintf("Count: %d", userLen)
 	for i, u := range userData.Users {
-		guids[i] = u.GUID
+		guids[i+1] = u.GUID // include offset for count of users
 	}
 	w.Write([]byte(strings.Join(guids[:], "\n")))
 }

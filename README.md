@@ -11,7 +11,10 @@ By default this app will log to stdout. If you run the daemon in detatched mode,
 
 
 ## Status
-Currently the application responds to queries at "/" and will respond with "Hello, Guest." and you can trigger other names in responses by setting the parameter "?name=<var>" in the request. 
+1. When navigating to the app root, the user will see very basic instructions. These will explain the steps to retrieve the users list, but not in enough detail to do so without explicit instructions provided by this README (intentionally).
+2. Calling /auth returns the client_id and a secret key. Users will need to form a valid request by hashing the key correctly. 
+3. /users returns the number of users and a list of GUIDs delimited by newlines
+
 
 ## Next
 Next steps for the app are:
