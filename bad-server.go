@@ -46,11 +46,11 @@ type Auth struct {
 	ClientID int
 	Secret   hash.Hash
 	Exp      time.Time
-	Attempts int
+	Remain   int
 }
 
-var clientID map[string]int
-var tokens []Auth
+var clientID map[string]int // only for /users now, but may expand in the future
+var token Auth              // there is only one set of valid credentials at a time *scream*
 
 // returns a pointer to the struct of all users
 func loadUsers() *Users {
@@ -70,21 +70,27 @@ func loadUsers() *Users {
 
 func rootHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(fmt.Sprintf("Welcome to the homepage! You must authenticate via `/auth` " +
-		"and use the information provided in order to retrieve a valid reponse from `/users`." +
+		"and use the information provided in order to retrieve a valid data from `/users`. " +
 		"You should already have instructions for how to form a valid request. Good luck!")))
 }
 
 // This function returns a list of all user GUIDs
-// The consumer should already be expecting a certain number of GUIDs
-// TODO: manipulate response length to "break" api response
+// if a user provides a properly-hashed secret key and client id, returns users from the API
+// otherwise it returns a generic "Bad Request", because it is a bad server
+// TODO: break out validations into a new function
 func returnAllUsers(w http.ResponseWriter, r *http.Request) {
-	fmt.Println("Endpoint Hit: returnAllUsers")
-	fmt.Println("validating request")
-	if !validateChecksum(r.Header.Get("X-Request-Checksum")) {
-		fmt.Println("validation failure")
-		http.Error(w, "Not authorized", 401)
+	authz := r.Header.Get("Authorization")
+	// no credentials provided
+	if authz == "" {
+		log.Printf("Error: Not Authorized")
+		log.Printf("Request Headers: %v", r)
+		w.WriteHeader(401)
+		w.Write([]byte("Not Authorized. Have you obtained credentials?"))
 		return
 	}
+	// split credentials into clientId and checksum
+	credentials := strings.Split(authz, "/")
+
 	fmt.Println("request validated")
 	userData := loadUsers()
 	userLen := len(userData.Users)
@@ -99,7 +105,7 @@ func returnAllUsers(w http.ResponseWriter, r *http.Request) {
 // our simple auth is implemented as follows:
 // client id key is generated so that this server knows what to validate against
 // a secret key is provided that the consumer needs to hash properly to validate the API
-//   - the secret key will expire after 5 minutes or 10 login failures, requiring a new key to be generated
+// the credentials will expire after 5 minutes or 5 login failures, a new key must be generated
 // if a user provides a properly-hashed secret key with a valid client id, then they may retrieve users from the API
 func generateTokens(w http.ResponseWriter, r *http.Request) {
 	// the secret key is a randomly generated 8-digit number
@@ -109,12 +115,15 @@ func generateTokens(w http.ResponseWriter, r *http.Request) {
 	secret := sha256.New()
 	secret.Write([]byte(fmt.Sprintf("%d/users", secretKey)))
 
-	tokens = append(tokens, Auth{ClientID: clientID["users"],
-		Secret:   secret,
-		Exp:      created.Add(time.Minute * 5),
-		Attempts: 0})
+	token = Auth{ClientID: clientID["users"],
+		Secret: secret,
+		Exp:    created.Add(time.Minute * 5),
+		Remain: 5}
 
-	w.Write([]byte(fmt.Sprintf("ClientId: %d\nSecret Key: %d", clientID["users"], secretKey)))
+	w.Header().Add("WWW-Authenticate", `Basic realm=users`)
+	w.Header().Add("clientID", fmt.Sprint(clientID["users"]))
+	w.Header().Add("secret", fmt.Sprint(secretKey))
+	w.Write([]byte("Congratulations, you are now authenticated! You can use the provided credentials to build a valid request and retrieve the list of users. Additional requests to `/auth` will invalidate these credentials and return a new set."))
 }
 
 func validateChecksum(checksum string) bool {
