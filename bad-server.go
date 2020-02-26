@@ -2,16 +2,17 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
+	"crypto/md5"
 	"encoding/json"
 	"fmt"
-	"hash"
+	"io"
 	"io/ioutil"
 	"log"
 	"math/rand"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -43,14 +44,14 @@ type Name struct {
 }
 
 type Auth struct {
-	ClientID int
-	Secret   hash.Hash
+	ClientID string
+	Secret   string
 	Exp      time.Time
 	Remain   int
 }
 
-var clientID map[string]int // only for /users now, but may expand in the future
-var token Auth              // there is only one set of valid credentials at a time *scream*
+var clientID string // only for /users now, but may be expanded in the future
+var token Auth      // there is only one set of valid credentials at a time *scream*
 
 // returns a pointer to the struct of all users
 func loadUsers() *Users {
@@ -70,7 +71,7 @@ func loadUsers() *Users {
 
 func rootHandler(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(fmt.Sprintf("Welcome to the homepage! You must authenticate via `/auth` " +
-		"and use the information provided in order to retrieve a valid data from `/users`. " +
+		"and use the information provided in order to retrieve valid data from `/users`. " +
 		"You should already have instructions for how to form a valid request. Good luck!")))
 }
 
@@ -79,19 +80,30 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 // otherwise it returns a generic "Bad Request", because it is a bad server
 // TODO: break out validations into a new function
 func returnAllUsers(w http.ResponseWriter, r *http.Request) {
+	// base cases
 	authz := r.Header.Get("Authorization")
-	// no credentials provided
-	if authz == "" {
-		log.Printf("Error: Not Authorized")
-		log.Printf("Request Headers: %v", r)
+	// no credentials provided or auth required
+	if authz == "" || token.Remain == 0 {
 		w.WriteHeader(401)
 		w.Write([]byte("Not Authorized. Have you obtained credentials?"))
 		return
 	}
 	// split credentials into clientId and checksum
-	credentials := strings.Split(authz, "/")
+	credentials := strings.Split(authz, ":")
+	if len(credentials) > 2 { // too many params passed
+		w.WriteHeader(403)
+		w.Write([]byte("Forbidden - is your Authorization token formatted correctly?"))
+		return
+	} else if credentials[0] != clientID || credentials[1] != token.Secret {
+		// decrement access attempts remaining
+		token.Remain--
+		w.WriteHeader(403)
+		w.Write([]byte("Forbidden - could not authorize credentials."))
+		w.Write([]byte(fmt.Sprintf("You have %d attempts remaining.", token.Remain)))
+		return
+	}
 
-	fmt.Println("request validated")
+	fmt.Println("request validated, returning user list")
 	userData := loadUsers()
 	userLen := len(userData.Users)
 	guids := make([]string, userLen+1) //here we can make slices of different length than users array, providing an extra line for the expected count
@@ -106,28 +118,26 @@ func returnAllUsers(w http.ResponseWriter, r *http.Request) {
 // client id key is generated so that this server knows what to validate against
 // a secret key is provided that the consumer needs to hash properly to validate the API
 // the credentials will expire after 5 minutes or 5 login failures, a new key must be generated
-// if a user provides a properly-hashed secret key with a valid client id, then they may retrieve users from the API
+// if a user provides an md5 checksum of the secret key+api with a valid client id, then they may retrieve users from the API
 func generateTokens(w http.ResponseWriter, r *http.Request) {
-	// the secret key is a randomly generated 8-digit number
+	// Generate secret key
 	created := time.Now()
 	rand.Seed(created.UnixNano())
 	secretKey := rand.Intn(99999999)
-	secret := sha256.New()
-	secret.Write([]byte(fmt.Sprintf("%d/users", secretKey)))
+	secretPrehash := strconv.Itoa(secretKey) + "/users" // leaving this here for clarity
+	secret := fmt.Sprintf("%x", md5.Sum([]byte(secretPrehash)))
 
-	token = Auth{ClientID: clientID["users"],
+	token = Auth{ClientID: clientID,
 		Secret: secret,
 		Exp:    created.Add(time.Minute * 5),
-		Remain: 5}
+		Remain: 5} // this disables auth lock
+
+	fmt.Printf("Token: %+v\n", token)
 
 	w.Header().Add("WWW-Authenticate", `Basic realm=users`)
-	w.Header().Add("clientID", fmt.Sprint(clientID["users"]))
-	w.Header().Add("secret", fmt.Sprint(secretKey))
+	w.Header().Add("clientID", clientID)
+	w.Header().Add("secret", strconv.Itoa(secretKey))
 	w.Write([]byte("Congratulations, you are now authenticated! You can use the provided credentials to build a valid request and retrieve the list of users. Additional requests to `/auth` will invalidate these credentials and return a new set."))
-}
-
-func validateChecksum(checksum string) bool {
-	return checksum == "12345/users"
 }
 
 func main() {
@@ -137,9 +147,13 @@ func main() {
 	r.HandleFunc("/users", returnAllUsers)
 	r.HandleFunc("/auth", generateTokens)
 
-	// Set client key for /users
-	clientID = make(map[string]int)
-	clientID["users"] = rand.Int()
+	// Generate client key for /users
+	created := time.Now()
+	rand.Seed(created.UnixNano())
+	clientSeed := rand.Intn(99999999)
+	h := md5.New()
+	io.WriteString(h, strconv.Itoa(clientSeed))
+	clientID = fmt.Sprintf("%x", h.Sum(nil))
 
 	srv := &http.Server{
 		Handler:      r,
@@ -162,7 +176,7 @@ func main() {
 
 	// Start Server
 	go func() {
-		log.Println("Starting Server")
+		log.Println("Server Started")
 		if err := srv.ListenAndServe(); err != nil {
 			log.Fatal(err)
 		}
