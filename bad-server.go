@@ -75,31 +75,48 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
 		"You should already have instructions for how to form a valid request. Good luck!")))
 }
 
+type HttpError struct {
+	Code    int
+	Message string
+}
+
+func (e *HttpError) Error() string {
+	return fmt.Sprintf("%d - %s", e.Code, e.Message)
+}
+
+// auth token must have remaining attempts available
+// Authorization header must
+func credentialValidator(authString string) error {
+	// new auth token required due to too many attempts
+	if token.Remain == 0 {
+		return &HttpError{401, "No login attempts remain, obtain new credentials and try again.\n"}
+	} else if time.Now().After(token.Exp) { // new auth token required due to timeout
+		return &HttpError{401, "Token has expired, obtain new credentials and try again.\n"}
+	}
+	credentials := strings.Split(authString, ":") // split credentials into clientId and checksum
+	if len(credentials) != 2 {                    // verify number of params in Auth header
+		return &HttpError{403, "Forbidden - verify Authorization token formatting.\n"}
+	} else if credentials[0] != clientID || credentials[1] != token.Secret {
+		// decrement access attempts remaining
+		token.Remain--
+		return &HttpError{403, fmt.Sprintf("Forbidden - could not authorize credentials."+
+			"You have %d attempts remaining.", token.Remain)}
+	}
+	return nil
+}
+
 // This function returns a list of all user GUIDs
 // if a user provides a properly-hashed secret key and client id, returns users from the API
 // otherwise it returns a generic "Bad Request", because it is a bad server
 // TODO: break out validations into a new function
 func returnAllUsers(w http.ResponseWriter, r *http.Request) {
-	// base cases
-	authz := r.Header.Get("Authorization")
-	// no credentials provided or auth required
-	if authz == "" || token.Remain == 0 {
-		w.WriteHeader(401)
-		w.Write([]byte("Not Authorized. Have you obtained credentials?"))
-		return
-	}
-	// split credentials into clientId and checksum
-	credentials := strings.Split(authz, ":")
-	if len(credentials) > 2 { // too many params passed
-		w.WriteHeader(403)
-		w.Write([]byte("Forbidden - is your Authorization token formatted correctly?"))
-		return
-	} else if credentials[0] != clientID || credentials[1] != token.Secret {
-		// decrement access attempts remaining
-		token.Remain--
-		w.WriteHeader(403)
-		w.Write([]byte("Forbidden - could not authorize credentials."))
-		w.Write([]byte(fmt.Sprintf("You have %d attempts remaining.", token.Remain)))
+	// Request must contain a properly-formatted Authorization header as described in README
+	err := credentialValidator(r.Header.Get("Authorization"))
+
+	if err != nil {
+		fmt.Printf("Error: %+v", err)
+		w.WriteHeader(err.(*HttpError).Code)
+		w.Write([]byte(err.(*HttpError).Message))
 		return
 	}
 
